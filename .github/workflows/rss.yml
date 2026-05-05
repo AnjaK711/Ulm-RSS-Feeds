@@ -1,0 +1,34 @@
+name: RSS Feed Generator
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # jede Stunde automatisch
+  workflow_dispatch:       # oder manuell per Knopfdruck
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python einrichten
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Abhängigkeiten installieren
+        run: pip install requests beautifulsoup4
+
+      - name: RSS Feed generieren
+        run: python rss_generator.py
+
+      - name: Feed hochladen
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add feed.xml
+          git commit -m "Feed aktualisiert" || echo "Keine Änderungen"
+          git push
