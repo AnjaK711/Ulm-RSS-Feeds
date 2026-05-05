@@ -1,34 +1,71 @@
-name: RSS Feed Generator
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
+import sys
 
-on:
-  schedule:
-    - cron: '0 * * * *'  # jede Stunde automatisch
-  workflow_dispatch:       # oder manuell per Knopfdruck
+URL = "https://www.schwaebische.de/regional/ulm-alb-donau/"
 
-permissions:
-  contents: write
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "de-DE,de;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
 
-jobs:
-  generate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+try:
+    seite = requests.get(URL, headers=HEADERS, timeout=15)
+    print(f"Status Code: {seite.status_code}")
+    if seite.status_code != 200:
+        print(f"Fehler: Website hat mit Status {seite.status_code} geantwortet")
+        sys.exit(1)
+except Exception as e:
+    print(f"Verbindungsfehler: {e}")
+    sys.exit(1)
 
-      - name: Python einrichten
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
+soup = BeautifulSoup(seite.text, "html.parser")
 
-      - name: Abhängigkeiten installieren
-        run: pip install requests beautifulsoup4
+artikel = []
+for link in soup.find_all("a", href=True):
+    titel = link.get_text(strip=True)
+    href = link["href"]
+    if titel and len(titel) > 30 and ("/regional/ulm" in href or "/artikel/" in href):
+        full_url = href if href.startswith("http") else "https://www.schwaebische.de" + href
+        artikel.append({"titel": titel, "link": full_url})
 
-      - name: RSS Feed generieren
-        run: python rss_generator.py
+# Duplikate entfernen
+gesehen = set()
+unique = []
+for a in artikel:
+    if a["link"] not in gesehen:
+        gesehen.add(a["link"])
+        unique.append(a)
 
-      - name: Feed hochladen
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add feed.xml
-          git commit -m "Feed aktualisiert" || echo "Keine Änderungen"
-          git push
+print(f"{len(unique)} Artikel gefunden")
+
+if len(unique) == 0:
+    print("Warnung: Keine Artikel gefunden - Feed wird trotzdem gespeichert")
+
+now = datetime.now().strftime("%a, %d %b %Y %H:%M:%S +0200")
+items = ""
+for a in unique[:20]:
+    titel = a['titel'].replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    items += f"""
+  <item>
+    <title>{titel}</title>
+    <link>{a['link']}</link>
+    <pubDate>{now}</pubDate>
+  </item>"""
+
+xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Schwäbische - Ulm/Alb-Donau</title>
+    <link>{URL}</link>
+    <description>Automatisch generierter Feed</description>
+    {items}
+  </channel>
+</rss>"""
+
+with open("feed.xml", "w", encoding="utf-8") as f:
+    f.write(xml)
+
+print("feed.xml wurde erfolgreich erstellt!")
